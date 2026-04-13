@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+~$*.pptx
+preview_v2/
+preview_v3/
+__pycache__/
+*.pyc
