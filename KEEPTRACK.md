@@ -38,8 +38,8 @@ Training completion status:
 
 Mark these whenever you change code locally and copy it to the farm.
 
-- [ ] `scripts/Claude/gradcam_compare.py` synced to farm
-- [ ] `scripts/Claude/live_demo.py` synced to farm
+- [x] `scripts/Claude/gradcam_compare.py` synced to farm
+- [x] `scripts/Claude/live_demo.py` synced to farm
 - [ ] `scripts/Claude/train_resnet50_tiny_plain.py` synced to farm
 - [ ] `scripts/Claude/tiny_imagenet_wnid_names.json` synced to farm
 - [ ] `scripts/Claude/words.txt` synced to farm
@@ -52,7 +52,9 @@ Current known state:
 - [x] Three final checkpoints load
 - [x] Ground-truth title support added locally
 - [x] `--target-mode top1|gt` added locally
-- [ ] Farm copy confirmed to include latest Grad-CAM changes
+- [x] Farm copy confirmed to include latest Grad-CAM changes
+- [x] `top1` mode smoke-tested on farm
+- [x] `gt` mode smoke-tested on farm
 - [ ] Human-readable class names confirmed
 - [ ] Final poster-quality examples selected
 - [ ] Final paper-style Grad-CAM figure exported
@@ -64,19 +66,19 @@ Current comparison caveat:
 
 ## Demo Status
 
-- [ ] Streamlit demo runs on GPU node
+- [x] Streamlit demo runs on GPU node
 - [ ] Local port forwarding verified
-- [ ] Upload image works
-- [ ] Three-model Grad-CAM inference works in demo
-- [ ] Top-5 predictions render correctly
+- [x] Upload image works
+- [x] Three-model Grad-CAM inference works in demo
+- [x] Top-5 predictions render correctly
 
 ## Recommended Next Step
 
-1. Sync latest `gradcam_compare.py` to farm.
-2. Run Grad-CAM in `--target-mode gt`.
-3. Confirm labels are readable.
-4. Pick final examples.
-5. Run Streamlit demo on GPU node.
+1. Improve label readability beyond wnids if a real Tiny-ImageNet `words.txt` can be restored.
+2. Pick final poster-quality examples instead of random diagnostic batches.
+3. Export final Grad-CAM figures in `--target-mode gt`.
+4. Verify local port forwarding for the Streamlit demo if needed.
+5. Keep local code and farm deployment copies synchronized.
 
 ## Useful Farm Checks
 

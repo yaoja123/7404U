@@ -98,8 +98,9 @@ Confirmed status:
 
 - three checkpoints load successfully
 - Grad-CAM runs successfully
-- `top1` mode smoke-tested successfully
-- `gt` mode smoke-tested successfully
+- latest farm copy includes the current Grad-CAM script changes
+- `top1` mode smoke-tested successfully on the GPU farm
+- `gt` mode smoke-tested successfully on the GPU farm
 - original-image panel can display inferred ground truth
 
 Ground-truth inference currently comes from Tiny-ImageNet-style image paths:
@@ -147,6 +148,13 @@ Main demo script:
 
 - `/Users/jayden/Desktop/7404 comp/project/scripts/Claude/live_demo.py`
 
+Confirmed status:
+
+- Streamlit demo runs on a GPU node
+- image upload works
+- three-model Grad-CAM inference works in the app
+- top-5 predictions render correctly
+
 Current expected deployment model:
 
 - run Streamlit on a GPU node
@@ -154,6 +162,8 @@ Current expected deployment model:
 
 Do not treat the gateway as the runtime for Grad-CAM or the live demo.
 Heavy inference should run on a GPU compute node, not on `gpu2gate1`.
+
+Port-forwarding from a local laptop/browser is still worth treating as a separate validation item unless it has been explicitly re-checked.
 
 ## Farm Workflow Notes
 
@@ -178,11 +188,12 @@ If code updates are needed on the farm, prefer:
 1. Improve label readability further if proper Tiny-ImageNet class names can be restored.
 2. Select better final example images instead of random diagnostic batches.
 3. Generate final Grad-CAM figures in `--target-mode gt`.
-4. Validate the Streamlit demo on a GPU node.
+4. Verify local port forwarding for the Streamlit demo if needed.
 5. Keep local code and farm deployment copies synchronized.
 
 ## Short Summary
 
 Training is complete and stable for CE, LS, and MaxSup.
-Grad-CAM now supports both diagnostic `top1` mode and fairer `gt` mode, and both have been tested successfully.
-The project is now in the final presentation and deployment phase, with the main remaining work being better labels, better example selection, final figure generation, and GPU-node demo validation.
+Grad-CAM now supports both diagnostic `top1` mode and fairer `gt` mode, and both have been tested successfully on the GPU farm.
+The Streamlit demo has also been validated on the GPU farm.
+The project is now in the final presentation phase, with the main remaining work being better labels, better example selection, final figure generation, and polished demo access workflow.
