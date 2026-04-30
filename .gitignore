@@ -1,7 +1,31 @@
 .DS_Store
 Thumbs.db
 ~$*.pptx
+
+# Preview / local app artifacts
 preview_v2/
 preview_v3/
+.claw/
+.streamlit/
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Large upstream/vendor trees
+maxsup_repo/
+
+# Temporary and generated outputs
+tmp/
+outputs/
+demo/candidates/
+demo/__pycache__/
+
+# Model artifacts
+weights/
+*.pth
+*.ckpt
+
+# Keep Claude scripts tracked; only ignore cache within them
+scripts/Claude/__pycache__/
+scripts/codex/
