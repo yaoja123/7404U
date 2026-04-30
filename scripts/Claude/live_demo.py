@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Streamlit live demo: three-way CE vs LS vs MaxSup Grad-CAM comparison.
+"""Streamlit live demo: Tiny-ImageNet comparison + optional ImageNet-1K MaxSup tab.
 
 Accepts file upload OR webcam capture. Runs the three Tiny-ImageNet models,
 renders a four-panel figure (original + three heatmaps) and a top-5 table per
-model.
+model. Optionally, it can also load the author-released ImageNet-1K ResNet-50
+MaxSup checkpoint and show it in a second tab on the same input image.
 
 Launch:
     streamlit run scripts/Claude/live_demo.py -- \
         --ce-ckpt weights/resnet50_ce_tiny.pth \
         --ls-ckpt weights/resnet50_ls_tiny.pth \
         --maxsup-ckpt weights/resnet50_maxsup_tiny.pth \
+        --imagenet-maxsup-ckpt weights/maxsup/resnet50_weights.pt \
         --class-names scripts/Claude/tiny_imagenet_wnid_names.json
 
 From a laptop, SSH-forward:
@@ -35,6 +37,7 @@ import streamlit as st
 import torch
 import torch.nn.functional as F
 import torchvision.models as tvm
+from torchvision.models import ResNet50_Weights
 import torchvision.transforms.functional as TF
 from PIL import Image
 from pytorch_grad_cam import GradCAM
@@ -81,6 +84,7 @@ def parse_cli_args() -> argparse.Namespace:
     p.add_argument("--ce-ckpt", type=Path, required=True)
     p.add_argument("--ls-ckpt", type=Path, required=True)
     p.add_argument("--maxsup-ckpt", type=Path, required=True)
+    p.add_argument("--imagenet-maxsup-ckpt", type=Path, default=None)
     p.add_argument("--class-names", type=Path, default=None)
     p.add_argument("--num-classes", type=int, default=200)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -98,19 +102,37 @@ def load_models(
     device: str,
 ) -> dict[str, torch.nn.Module]:
     def build(path: str) -> torch.nn.Module:
-        model = tvm.resnet50(num_classes=num_classes)
-        apply_blurpool(model)
-        payload = torch.load(path, map_location="cpu", weights_only=False)
-        sd = payload.get("state_dict", payload)
-        model.load_state_dict(sd, strict=False)
-        model.eval().to(device)
-        return model
+        return build_resnet50_model(path, num_classes, device)
 
     return {
         "ce": build(ce_path),
         "ls": build(ls_path),
         "maxsup": build(maxsup_path),
     }
+
+
+def normalize_state_dict_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    if not state_dict:
+        return state_dict
+    if all(k.startswith("module.") for k in state_dict.keys()):
+        return {k.removeprefix("module."): v for k, v in state_dict.items()}
+    return state_dict
+
+
+def build_resnet50_model(path: str, num_classes: int, device: str) -> torch.nn.Module:
+    model = tvm.resnet50(num_classes=num_classes)
+    apply_blurpool(model)
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    sd = payload.get("state_dict", payload)
+    sd = normalize_state_dict_keys(sd)
+    model.load_state_dict(sd, strict=False)
+    model.eval().to(device)
+    return model
+
+
+@st.cache_resource(show_spinner="Loading ImageNet-1K MaxSup model...")
+def load_imagenet_model(path: str, device: str) -> torch.nn.Module:
+    return build_resnet50_model(path, 1000, device)
 
 
 @st.cache_resource
@@ -131,6 +153,11 @@ def load_class_names(path: str | None, num_classes: int) -> list[str]:
         else:
             names[idx] = str(v)
     return names
+
+
+@st.cache_resource
+def load_imagenet_class_names() -> list[str]:
+    return list(ResNet50_Weights.IMAGENET1K_V2.meta["categories"])
 
 
 def preprocess(pil_image: Image.Image) -> tuple[torch.Tensor, np.ndarray]:
@@ -183,6 +210,25 @@ def render_figure(
     return fig
 
 
+def render_single_model_figure(
+    rgb_float: np.ndarray,
+    overlay: np.ndarray,
+    title: str,
+    label: str,
+    conf: float,
+) -> plt.Figure:
+    fig, axes = plt.subplots(1, 2, figsize=(6.4, 3.6))
+    axes[0].imshow(rgb_float)
+    axes[0].set_title("Input", fontsize=11)
+    axes[0].axis("off")
+
+    axes[1].imshow(overlay)
+    axes[1].set_title(f"{title}\n{label} ({conf*100:.1f}%)", fontsize=11)
+    axes[1].axis("off")
+    plt.tight_layout()
+    return fig
+
+
 def main() -> None:
     cli = parse_cli_args()
     st.set_page_config(page_title="MaxSup vs LS vs CE — Grad-CAM", layout="wide")
@@ -197,6 +243,15 @@ def main() -> None:
         str(cli.ce_ckpt), str(cli.ls_ckpt), str(cli.maxsup_ckpt),
         cli.num_classes, cli.device,
     )
+    imagenet_model = None
+    imagenet_class_names: list[str] | None = None
+    imagenet_load_error: str | None = None
+    if cli.imagenet_maxsup_ckpt:
+        try:
+            imagenet_model = load_imagenet_model(str(cli.imagenet_maxsup_ckpt), cli.device)
+            imagenet_class_names = load_imagenet_class_names()
+        except Exception as exc:  # keep Tiny tab usable even if optional model fails
+            imagenet_load_error = str(exc)
 
     with st.sidebar:
         st.header("Input")
@@ -208,7 +263,16 @@ def main() -> None:
             uploaded = st.camera_input("Take a picture")
         st.markdown(f"**Device:** `{cli.device}`")
         st.markdown("**Models:**")
-        st.code(f"CE     -> {cli.ce_ckpt}\nLS     -> {cli.ls_ckpt}\nMaxSup -> {cli.maxsup_ckpt}")
+        lines = [
+            f"CE           -> {cli.ce_ckpt}",
+            f"LS           -> {cli.ls_ckpt}",
+            f"MaxSup Tiny  -> {cli.maxsup_ckpt}",
+        ]
+        if cli.imagenet_maxsup_ckpt:
+            lines.append(f"MaxSup 1K    -> {cli.imagenet_maxsup_ckpt}")
+        st.code("\n".join(lines))
+        if imagenet_load_error:
+            st.error(f"ImageNet-1K tab disabled: {imagenet_load_error}")
 
     if uploaded is None:
         st.info("Upload or capture an image to run inference.")
@@ -220,8 +284,12 @@ def main() -> None:
     overlays: dict[str, np.ndarray] = {}
     top1: dict[str, tuple[str, float]] = {}
     topk_tables: dict[str, pd.DataFrame] = {}
+    imagenet_overlay: np.ndarray | None = None
+    imagenet_top1: tuple[str, float] | None = None
+    imagenet_topk_table: pd.DataFrame | None = None
 
     progress = st.progress(0.0, text="Running inference...")
+    total_steps = len(METHODS) + (1 if imagenet_model is not None else 0)
     for i, (key, pretty) in enumerate(METHODS):
         overlay, pairs = gradcam_and_topk(models[key], input_tensor, rgb_float, cli.device)
         overlays[key] = overlay
@@ -231,19 +299,76 @@ def main() -> None:
             [(class_names[j] if j < len(class_names) else str(j), float(p)) for j, p in pairs],
             columns=["class", "prob"],
         )
-        progress.progress((i + 1) / len(METHODS), text=f"Done: {pretty}")
+        progress.progress((i + 1) / total_steps, text=f"Done: {pretty}")
+
+    if imagenet_model is not None and imagenet_class_names is not None:
+        overlay, pairs = gradcam_and_topk(imagenet_model, input_tensor, rgb_float, cli.device)
+        idx, conf = pairs[0]
+        imagenet_overlay = overlay
+        imagenet_top1 = (
+            imagenet_class_names[idx] if idx < len(imagenet_class_names) else str(idx),
+            conf,
+        )
+        imagenet_topk_table = pd.DataFrame(
+            [
+                (
+                    imagenet_class_names[j] if j < len(imagenet_class_names) else str(j),
+                    float(p),
+                )
+                for j, p in pairs
+            ],
+            columns=["class", "prob"],
+        )
+        progress.progress(1.0, text="Done: ImageNet-1K MaxSup")
 
     progress.empty()
-    fig = render_figure(rgb_float, overlays, top1)
-    st.pyplot(fig, use_container_width=True)
+    if imagenet_model is None:
+        fig = render_figure(rgb_float, overlays, top1)
+        st.pyplot(fig, use_container_width=True)
 
-    st.subheader("Top-5 per model")
-    cols = st.columns(len(METHODS))
-    for col, (_, pretty) in zip(cols, METHODS):
-        col.markdown(f"**{pretty}**")
-        df = topk_tables[pretty].copy()
+        st.subheader("Top-5 per model")
+        cols = st.columns(len(METHODS))
+        for col, (_, pretty) in zip(cols, METHODS):
+            col.markdown(f"**{pretty}**")
+            df = topk_tables[pretty].copy()
+            df["prob"] = df["prob"].map(lambda x: f"{x*100:.2f}%")
+            col.dataframe(df, hide_index=True, use_container_width=True)
+        return
+
+    tiny_tab, imagenet_tab = st.tabs(["Tiny-ImageNet CE / LS / MaxSup", "ImageNet-1K MaxSup"])
+
+    with tiny_tab:
+        st.caption("Fair Tiny-ImageNet comparison among CE, Label Smoothing, and MaxSup.")
+        fig = render_figure(rgb_float, overlays, top1)
+        st.pyplot(fig, use_container_width=True)
+
+        st.subheader("Top-5 per model")
+        cols = st.columns(len(METHODS))
+        for col, (_, pretty) in zip(cols, METHODS):
+            col.markdown(f"**{pretty}**")
+            df = topk_tables[pretty].copy()
+            df["prob"] = df["prob"].map(lambda x: f"{x*100:.2f}%")
+            col.dataframe(df, hide_index=True, use_container_width=True)
+
+    with imagenet_tab:
+        st.caption("Author-released original-paper model: ResNet-50 MaxSup trained on full ImageNet-1K.")
+        if imagenet_overlay is None or imagenet_top1 is None or imagenet_topk_table is None:
+            st.error("ImageNet-1K MaxSup output is unavailable.")
+            return
+
+        fig = render_single_model_figure(
+            rgb_float,
+            imagenet_overlay,
+            "ImageNet-1K MaxSup",
+            imagenet_top1[0],
+            imagenet_top1[1],
+        )
+        st.pyplot(fig, use_container_width=True)
+
+        st.subheader("Top-5")
+        df = imagenet_topk_table.copy()
         df["prob"] = df["prob"].map(lambda x: f"{x*100:.2f}%")
-        col.dataframe(df, hide_index=True, use_container_width=True)
+        st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 if __name__ == "__main__":
