@@ -48,6 +48,17 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
 IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 INPUT_SIZE = 224
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_EXAMPLES_DIR = REPO_ROOT / "demo" / "cherry_pick"
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+TINY_VAL_SUMMARY = pd.DataFrame(
+    [
+        ("CE", 62.60),
+        ("LS", 63.63),
+        ("MaxSup", 63.99),
+    ],
+    columns=["Model", "best_acc1 (%)"],
+)
 
 METHODS = [
     ("ce", "CE"),
@@ -85,6 +96,7 @@ def parse_cli_args() -> argparse.Namespace:
     p.add_argument("--ls-ckpt", type=Path, required=True)
     p.add_argument("--maxsup-ckpt", type=Path, required=True)
     p.add_argument("--imagenet-maxsup-ckpt", type=Path, default=None)
+    p.add_argument("--examples-dir", type=Path, default=DEFAULT_EXAMPLES_DIR)
     p.add_argument("--class-names", type=Path, default=None)
     p.add_argument("--num-classes", type=int, default=200)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -158,6 +170,15 @@ def load_class_names(path: str | None, num_classes: int) -> list[str]:
 @st.cache_resource
 def load_imagenet_class_names() -> list[str]:
     return list(ResNet50_Weights.IMAGENET1K_V2.meta["categories"])
+
+
+def list_example_images(examples_dir: Path) -> list[Path]:
+    if not examples_dir.exists() or not examples_dir.is_dir():
+        return []
+    return sorted(
+        [p for p in examples_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS],
+        key=lambda p: p.name.lower(),
+    )
 
 
 def preprocess(pil_image: Image.Image) -> tuple[torch.Tensor, np.ndarray]:
@@ -255,12 +276,21 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Input")
-        mode = st.radio("Source", ["Upload", "Webcam"], horizontal=True)
+        mode = st.radio("Source", ["Upload", "Webcam", "Examples"], horizontal=True)
         uploaded: io.BytesIO | None = None
+        selected_example_path: Path | None = None
+        example_images = list_example_images(cli.examples_dir)
         if mode == "Upload":
             uploaded = st.file_uploader("Image file", type=["png", "jpg", "jpeg", "webp", "bmp"])
-        else:
+        elif mode == "Webcam":
             uploaded = st.camera_input("Take a picture")
+        else:
+            if example_images:
+                selected_name = st.selectbox("Cherry-pick example", [p.name for p in example_images])
+                selected_example_path = next(p for p in example_images if p.name == selected_name)
+                st.caption(f"Folder: `{cli.examples_dir}`")
+            else:
+                st.warning(f"No example images found in `{cli.examples_dir}`.")
         st.markdown(f"**Device:** `{cli.device}`")
         st.markdown("**Models:**")
         lines = [
@@ -271,14 +301,25 @@ def main() -> None:
         if cli.imagenet_maxsup_ckpt:
             lines.append(f"MaxSup 1K    -> {cli.imagenet_maxsup_ckpt}")
         st.code("\n".join(lines))
+        st.markdown("**Tiny-ImageNet validation summary**")
+        st.dataframe(TINY_VAL_SUMMARY, hide_index=True, use_container_width=True)
         if imagenet_load_error:
             st.error(f"ImageNet-1K tab disabled: {imagenet_load_error}")
 
-    if uploaded is None:
-        st.info("Upload or capture an image to run inference.")
+    pil: Image.Image | None = None
+    if mode in {"Upload", "Webcam"}:
+        if uploaded is not None:
+            pil = Image.open(uploaded)
+    elif selected_example_path is not None:
+        pil = Image.open(selected_example_path)
+
+    if pil is None:
+        if mode == "Examples":
+            st.info("Select a cherry-pick example to run inference.")
+        else:
+            st.info("Upload or capture an image to run inference.")
         return
 
-    pil = Image.open(uploaded)
     input_tensor, rgb_float = preprocess(pil)
 
     overlays: dict[str, np.ndarray] = {}
